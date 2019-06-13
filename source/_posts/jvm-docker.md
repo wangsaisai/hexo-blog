@@ -140,6 +140,68 @@ uintx ParallelGCThreads = 2 {product}
 
 - openjdk:8u212 can get the resource limit in docker container
 
+### implementation
+
+```
+ julong os::Linux::available_memory() {
+   // values in struct sysinfo are "unsigned long"
+   struct sysinfo si;
+-  sysinfo(&si);
++  julong avail_mem;
+ 
+-  return (julong)si.freeram * si.mem_unit;
++  if (OSContainer::is_containerized()) {
++    jlong mem_limit, mem_usage;
++    if ((mem_limit = OSContainer::memory_limit_in_bytes()) > 0) {
++      if ((mem_usage = OSContainer::memory_usage_in_bytes()) > 0) {
++        if (mem_limit > mem_usage) {
++          avail_mem = (julong)mem_limit - (julong)mem_usage;
++        } else {
++          avail_mem = 0;
++        }
++        log_trace(os)("available container memory: " JULONG_FORMAT, avail_mem);
++        return avail_mem;
++      } else {
++        log_debug(os,container)("container memory usage call failed: " JLONG_FORMAT, mem_usage);
++      }
++    } else {
++      log_debug(os,container)("container memory unlimited or failed: " JLONG_FORMAT, mem_limit);
++    }
++  }
++
++  sysinfo(&si);
++  avail_mem = (julong)si.freeram * si.mem_unit;
++  log_trace(os)("available memory: " JULONG_FORMAT, avail_mem);
++  return avail_mem;
+ }
+  
+ julong os::physical_memory() {
+-  return Linux::physical_memory();
++  if (OSContainer::is_containerized()) {
++    jlong mem_limit;
++    if ((mem_limit = OSContainer::memory_limit_in_bytes()) > 0) {
++      log_trace(os)("total container memory: " JLONG_FORMAT, mem_limit);
++      return (julong)mem_limit; 
++    } else {
++      if (mem_limit == OSCONTAINER_ERROR) {
++        log_debug(os,container)("container memory limit call failed");
++      }
++      if (mem_limit == -1) {
++        log_debug(os,container)("container memory unlimited, using host value");
++      }
++    }
++  }
++
++  jlong phys_mem = Linux::physical_memory();
++  log_trace(os)("total system memory: " JLONG_FORMAT, phys_mem);
++  return phys_mem;
+ }
+```
+
 ### link
 
-JDK-8146115 : Improve docker container detection and resource configuration usage [https://bugs.java.com/bugdatabase/view_bug.do?bug_id=JDK-8146115](https://bugs.java.com/bugdatabase/view_bug.do?bug_id=JDK-8146115)
+JDK-8146115 : Improve docker container detection and resource configuration usage 
+
+jira : [https://bugs.java.com/bugdatabase/view_bug.do?bug_id=JDK-8146115](https://bugs.java.com/bugdatabase/view_bug.do?bug_id=JDK-8146115)
+
+patch : [http://cr.openjdk.java.net/~bobv/8146115/webrev.03/open.patch](http://cr.openjdk.java.net/~bobv/8146115/webrev.03/open.patch)
